@@ -11,7 +11,7 @@ from utilities.bitget_futures import BitgetFutures
 
 # --- CONFIG ---
 params = {
-    'symbol': '/USDT:USDT',
+    'symbol': 'BTC/USDT:USDT',
     'timeframe': '1h',
     'margin_mode': 'isolated',  # 'cross'
     'balance_fraction': 1,
@@ -25,10 +25,10 @@ params = {
     'use_shorts': True,  # set to False if you want to use only longs
 }
 
-key_path = 'LiveTradingBots/secret.json'
+key_path = 'secret.json'
 key_name = 'envelope'
 
-tracker_file = f"LiveTradingBots/code/strategies/envelope/tracker_{params['symbol'].replace('/', '-').replace(':', '-')}.json"
+tracker_file = f"./code/strategies/env1/tracker_{params['symbol'].replace('/', '-').replace(':', '-')}.json"
 
 trigger_price_delta = 0.005  # what I use for a 1h timeframe
 # trigger_price_delta = 0.0015  # what I use for a 15m timeframe
