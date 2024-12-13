@@ -1,2 +1,4 @@
-source LiveTradingBots/code/.venv/bin/activate
-python3 LiveTradingBots/code/strategies/envelope/run.py
+#!/bin/bash
+
+source TradingPerso/code/.venv/bin/activate
+python3 TradingPerso/code/strategies/envelope/run_ada.py
