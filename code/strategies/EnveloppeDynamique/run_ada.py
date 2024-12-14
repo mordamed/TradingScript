@@ -18,17 +18,15 @@ params = {
     'leverage': 5,
     'average_type': 'DCM',  # 'SMA', 'EMA', 'WMA', 'DCM' 
     'average_period': 5,
-    'envelopes': [0.02, 0.04, 0.06],
     'stop_loss_pct': 0.4,
-#    'price_jump_pct': 0.3,  # optional, uncomment to use
     'use_longs': True,  # set to False if you want to use only shorts
     'use_shorts': True,  # set to False if you want to use only longs
 }
 
-key_path = 'TradingPerso/secret.json'
+key_path = 'secret.json'
 key_name = 'envelope'
 
-tracker_file = f"TradingPerso/code/strategies/envelope/tracker_{params['symbol'].replace('/', '-').replace(':', '-')}.json"
+tracker_file = f"./code/strategies/envelope/tracker_{params['symbol'].replace('/', '-').replace(':', '-')}.json"
 
 trigger_price_delta = 0.005  # what I use for a 1h timeframe
 # trigger_price_delta = 0.0015  # what I use for a 15m timeframe
@@ -41,9 +39,13 @@ bitget = BitgetFutures(api_setup)
 
 
 # --- TRACKER FILE ---
+if not os.path.exists(os.path.dirname(tracker_file)):
+    os.makedirs(os.path.dirname(tracker_file))
+
 if not os.path.exists(tracker_file):
     with open(tracker_file, 'w') as file:
         json.dump({"status": "ok_to_trade", "last_side": None, "stop_loss_ids": []}, file)
+
 
 def read_tracker_file(file_path):
     with open(file_path, 'r') as file:
@@ -100,16 +102,12 @@ def dynamic_envelope(data, atr_multiplier=1.5, period=14):
     data['ATR'] = calculate_atr(data, period)
 
     # Calculate dynamic envelope bands
-    data['Upper Band'] = data['close'] + (data['ATR'] * atr_multiplier)
-    data['Lower Band'] = data['close'] - (data['ATR'] * atr_multiplier)
+    data['Upper Band'] = data['average'] + (data['ATR'] * atr_multiplier)
+    data['Lower Band'] = data['average'] - (data['ATR'] * atr_multiplier)
 
     return data
 
 data = dynamic_envelope(data)
-
-for i, e in enumerate(params['envelopes']):
-    data[f'band_high_{i + 1}'] = data['average'] / (1 - e)
-    data[f'band_low_{i + 1}'] = data['average'] * (1 - e)
 print(f"{datetime.now().strftime('%H:%M:%S')}: ohlcv data fetched")
 
 
@@ -239,97 +237,37 @@ print(f"{datetime.now().strftime('%H:%M:%S')}: the trading balance is {balance}"
 if open_position:
     long_ok = True if 'long' == position['side'] else False
     short_ok = True if 'short' == position['side'] else False
-    range_longs = range(len(params['envelopes']) - long_orders_left, len(params['envelopes']))
-    range_shorts = range(len(params['envelopes']) - short_orders_left, len(params['envelopes']))
 else:
     long_ok = True
     short_ok = True
-    range_longs = range(len(params['envelopes']))
-    range_shorts = range(len(params['envelopes']))
-
-if not params['use_longs']:
-    long_ok = False
-
-if not params['use_shorts']:
-    short_ok = False
 
 if long_ok:
-    for i in range_longs:
-        amount = balance / len(params['envelopes']) / data[f'band_low_{i + 1}'].iloc[-1]
-        min_amount = bitget.fetch_min_amount_tradable(params['symbol'])
-        if amount >= min_amount:
-            # entry           
-            bitget.place_trigger_limit_order(
-                symbol=params['symbol'],
-                side='buy',
-                amount=amount,
-                trigger_price= (1 + trigger_price_delta) * data[f'band_low_{i + 1}'].iloc[-1],
-                price=data[f'band_low_{i + 1}'].iloc[-1],
-                print_error=True,
-            )
-            print(f"{datetime.now().strftime('%H:%M:%S')}: placed open long trigger limit order of {amount}, trigger price {1.005 * data[f'band_low_{i + 1}'].iloc[-1]}, price {data[f'band_low_{i + 1}'].iloc[-1]}")
-            # exit
-            bitget.place_trigger_market_order(
-                symbol=params['symbol'],
-                side='sell',
-                amount=amount,
-                trigger_price=data['average'].iloc[-1],
-                reduce=True,
-                print_error=True,
-            )
-            print(f"{datetime.now().strftime('%H:%M:%S')}: placed exit long trigger market order of {amount}, price {data['average'].iloc[-1]}")
-            # sl
-            sl_order = bitget.place_trigger_market_order(
-                symbol=params['symbol'],
-                side='sell',
-                amount=amount,
-                trigger_price=data[f'band_low_{i + 1}'].iloc[-1] * (1 - params['stop_loss_pct']),
-                reduce=True,
-                print_error=True,
-            )
-            info["stop_loss_ids"].append(sl_order['id'])
-            print(f"{datetime.now().strftime('%H:%M:%S')}: placed sl long trigger market order of {amount}, price {data[f'band_low_{i + 1}'].iloc[-1] * (1 - params['stop_loss_pct'])}")
-        else:
-            print(f"{datetime.now().strftime('%H:%M:%S')}: /!\\ long orders not placed for envelope {i+1}, amount {amount} smaller than minimum requirement {min_amount}")
+    amount = balance / data['Lower Band'].iloc[-1]
+    min_amount = bitget.fetch_min_amount_tradable(params['symbol'])
+    if amount >= min_amount:
+        bitget.place_trigger_limit_order(
+            symbol=params['symbol'],
+            side='buy',
+            amount=amount,
+            trigger_price=data['Lower Band'].iloc[-1],
+            price=data['Lower Band'].iloc[-1],
+            print_error=True,
+        )
+        print(f"{datetime.now().strftime('%H:%M:%S')}: placed open long trigger limit order of {amount}, price {data['Lower Band'].iloc[-1]}")
 
 if short_ok:
-    for i in range_shorts:
-        amount = balance / len(params['envelopes']) / data[f'band_high_{i + 1}'].iloc[-1]
-        min_amount = bitget.fetch_min_amount_tradable(params['symbol'])
-        if amount >= min_amount:
-            # entry     
-            bitget.place_trigger_limit_order(
-                symbol=params['symbol'],
-                side='sell',
-                amount=amount,
-                trigger_price= (1 - trigger_price_delta) * data[f'band_high_{i + 1}'].iloc[-1],
-                price=data[f'band_high_{i + 1}'].iloc[-1],
-                print_error=True,
-            )
-            print(f"{datetime.now().strftime('%H:%M:%S')}: placed open short trigger limit order of {amount}, trigger price {0.995 * data[f'band_high_{i + 1}'].iloc[-1]}, price {data[f'band_high_{i + 1}'].iloc[-1]}")
-            # exit
-            bitget.place_trigger_market_order(
-                symbol=params['symbol'],
-                side='buy',
-                amount=amount,
-                trigger_price=data['average'].iloc[-1],
-                reduce=True,
-                print_error=True,
-            )
-            print(f"{datetime.now().strftime('%H:%M:%S')}: placed exit short trigger market order of {amount}, price {data['average'].iloc[-1]}")
-            # sl
-            sl_order = bitget.place_trigger_market_order(
-                symbol=params['symbol'],
-                side='buy',
-                amount=amount,
-                trigger_price=data[f'band_high_{i + 1}'].iloc[-1] * (1 + params['stop_loss_pct']),
-                reduce=True,
-                print_error=True,
-            )
-            info["stop_loss_ids"].append(sl_order['id'])
-            print(f"{datetime.now().strftime('%H:%M:%S')}: placed sl short trigger market order of {amount}, price {data[f'band_high_{i + 1}'].iloc[-1] * (1 + params['stop_loss_pct'])}")
-        else:
-            print(f"{datetime.now().strftime('%H:%M:%S')}: /!\\ short orders not placed for envelope {i+1}, amount {amount} smaller than minimum requirement {min_amount}")
-            
+    amount = balance / data['Upper Band'].iloc[-1]
+    min_amount = bitget.fetch_min_amount_tradable(params['symbol'])
+    if amount >= min_amount:
+        bitget.place_trigger_limit_order(
+            symbol=params['symbol'],
+            side='sell',
+            amount=amount,
+            trigger_price=data['Upper Band'].iloc[-1],
+            price=data['Upper Band'].iloc[-1],
+            print_error=True,
+        )
+        print(f"{datetime.now().strftime('%H:%M:%S')}: placed open short trigger limit order of {amount}, price {data['Upper Band'].iloc[-1]}")
+
 update_tracker_file(tracker_file, info)
 print(f"{datetime.now().strftime('%H:%M:%S')}: <<< all done")
